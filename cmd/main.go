@@ -8,6 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/argoproj/argo-cd/reposerver/apiclient"
+	"github.com/argoproj/argo-cd/util/db"
+	"github.com/argoproj/argo-cd/util/settings"
+
 	"github.com/argoproj-labs/argocd-notifications/builtin"
 	"github.com/argoproj-labs/argocd-notifications/controller"
 	"github.com/argoproj-labs/argocd-notifications/notifiers"
@@ -57,6 +61,30 @@ func main() {
 	}
 }
 
+func repoServerSample(namespace string, k8sClient kubernetes.Interface) {
+	db := db.NewDB(namespace, settings.NewSettingsManager(context.Background(), k8sClient, namespace), k8sClient)
+	repo, err := db.GetRepository(context.Background(), "https://github.com/argoproj/argocd-example-apps")
+	if err != nil {
+		log.Fatal(err)
+	}
+	repoClientset := apiclient.NewRepoServerClientset("argocd-repo-server:8081", 5)
+	closer, repoClient, err := repoClientset.NewRepoServerClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		_ = closer.Close()
+	}()
+	metadata, err := repoClient.GetRevisionMetadata(context.Background(), &apiclient.RepoServerRevisionMetadataRequest{
+		Repo:     repo,
+		Revision: "6bed858de32a0e876ec49dad1a2e3c5840d3fb07",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	println(fmt.Sprintf("%v", metadata))
+}
+
 func newCommand() *cobra.Command {
 	var (
 		clientConfig     clientcmd.ClientConfig
@@ -85,6 +113,7 @@ func newCommand() *cobra.Command {
 					return err
 				}
 			}
+			repoServerSample(namespace, k8sClient)
 
 			var cancelPrev context.CancelFunc
 			watchConfig(context.Background(), k8sClient, namespace, func(triggers map[string]triggers.Trigger, notifiers map[string]notifiers.Notifier, contextVals map[string]string) error {
